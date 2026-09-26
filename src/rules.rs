@@ -164,36 +164,31 @@ fn parse_threshold(value: &str) -> Result<f64> {
     Ok(v)
 }
 
-/// Loads `*.md` from each directory in order; a later layer replaces rules
-/// with the same id, so repo rules override global ones.
-pub fn load(layers: &[PathBuf]) -> Result<Vec<Rule>> {
+/// Loads every `*.md` in `dir`; a missing directory means no rules.
+pub fn load(dir: &Path) -> Result<Vec<Rule>> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(Vec::new());
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "md"))
+        .collect();
+    files.sort();
     let mut by_id: BTreeMap<String, Rule> = BTreeMap::new();
-    for dir in layers {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        let mut files: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x == "md"))
-            .collect();
-        files.sort();
-        let mut layer: BTreeMap<String, Rule> = BTreeMap::new();
-        for file in files {
-            let text = std::fs::read_to_string(&file)
-                .with_context(|| format!("reading {}", file.display()))?;
-            for rule in parse(&file, &text)? {
-                if let Some(prev) = layer.get(&rule.id) {
-                    bail!(
-                        "rule `{}` is defined in both {} and {}",
-                        rule.id,
-                        prev.source.display(),
-                        file.display()
-                    );
-                }
-                layer.insert(rule.id.clone(), rule);
+    for file in files {
+        let text = std::fs::read_to_string(&file)
+            .with_context(|| format!("reading {}", file.display()))?;
+        for rule in parse(&file, &text)? {
+            if let Some(prev) = by_id.get(&rule.id) {
+                bail!(
+                    "rule `{}` is defined in both {} and {}",
+                    rule.id,
+                    prev.source.display(),
+                    file.display()
+                );
             }
+            by_id.insert(rule.id.clone(), rule);
         }
-        by_id.extend(layer);
     }
     Ok(by_id.into_values().collect())
 }
@@ -263,26 +258,21 @@ Does a test only assert on mocks?
     }
 
     #[test]
-    fn later_layers_override_by_id_and_duplicates_in_a_layer_fail() {
-        let global = tempfile::tempdir().unwrap();
-        let repo = tempfile::tempdir().unwrap();
-        std::fs::write(
-            global.path().join("a.md"),
-            "# x\nglobs: *\n\nGlobal?\n# y\nglobs: *\n\nY?",
-        )
-        .unwrap();
-        std::fs::write(repo.path().join("a.md"), "# x\nglobs: *\n\nRepo?").unwrap();
-        let rules = load(&[global.path().into(), repo.path().into()]).unwrap();
-        assert_eq!(
-            rules
-                .iter()
-                .map(|r| (r.id.as_str(), r.question.as_str()))
-                .collect::<Vec<_>>(),
-            [("x", "Repo?"), ("y", "Y?")]
-        );
+    fn loads_every_file_and_rejects_duplicate_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.md"), "# x\nglobs: *\n\nX?").unwrap();
+        std::fs::write(dir.path().join("b.md"), "# y\nglobs: *\n\nY?").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
+        let ids: Vec<_> = load(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ids, ["x", "y"]);
 
-        std::fs::write(repo.path().join("b.md"), "# x\nglobs: *\n\nAgain?").unwrap();
-        let err = load(&[repo.path().into()]).unwrap_err().to_string();
+        std::fs::write(dir.path().join("c.md"), "# x\nglobs: *\n\nAgain?").unwrap();
+        let err = load(dir.path()).unwrap_err().to_string();
         assert!(err.contains("defined in both"), "{err}");
+        assert!(load(&dir.path().join("missing")).unwrap().is_empty());
     }
 }

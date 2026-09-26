@@ -97,10 +97,6 @@ fn env_dir(var: &str, xdg: &str, fallback: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(fallback).join("kass"))
 }
 
-fn config_dir() -> Result<PathBuf> {
-    env_dir("KASS_CONFIG_DIR", "XDG_CONFIG_HOME", ".config")
-}
-
 fn state_dir() -> Result<PathBuf> {
     env_dir("KASS_STATE_DIR", "XDG_STATE_HOME", ".local/state")
 }
@@ -114,11 +110,8 @@ fn repo_root(start: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-fn rule_layers(root: &Path) -> Result<Vec<PathBuf>> {
-    Ok(vec![
-        config_dir()?.join("rules"),
-        root.join(".kass").join("rules"),
-    ])
+fn rules_dir(root: &Path) -> PathBuf {
+    root.join(".kass").join("rules")
 }
 
 fn client() -> Result<Option<jev::Client>> {
@@ -186,12 +179,11 @@ fn cmd_check(
     })?;
     let cwd = std::env::current_dir()?.canonicalize()?;
     let root = repo_root(&cwd);
-    let rules = rules::load(&rule_layers(&root)?)?;
+    let rules = rules::load(&rules_dir(&root))?;
     if rules.is_empty() {
         bail!(
-            "no rules found; add *.md files to {} or {}",
-            config_dir()?.join("rules").display(),
-            root.join(".kass/rules").display()
+            "no rules found; add *.md files to {}",
+            rules_dir(&root).display()
         );
     }
     let files = if !all_files {
@@ -301,14 +293,13 @@ fn print_text(results: &[FileResult], show_passes: bool) {
 
 fn cmd_rules() -> Result<ExitCode> {
     let root = repo_root(&std::env::current_dir()?.canonicalize()?);
-    for dir in rule_layers(&root)? {
-        println!(
-            "# layer {}{}",
-            dir.display(),
-            if dir.exists() { "" } else { " (missing)" }
-        );
-    }
-    for r in rules::load(&rule_layers(&root)?)? {
+    let dir = rules_dir(&root);
+    println!(
+        "# rules from {}{}",
+        dir.display(),
+        if dir.exists() { "" } else { " (missing)" }
+    );
+    for r in rules::load(&dir)? {
         println!(
             "\n{}  [{}]  fail={} warn={}  {}",
             r.id,
@@ -395,7 +386,7 @@ fn cmd_hook_claude() -> Result<ExitCode> {
     };
     let root = repo_root(canon.parent().unwrap_or(&canon));
     let rel = relative(&root, &canon)?;
-    let rules = rules::load(&rule_layers(&root)?)?;
+    let rules = rules::load(&rules_dir(&root))?;
     let results = check::run(&client, &root, &[rel], &rules);
     if results.is_empty() {
         return Ok(ExitCode::SUCCESS);

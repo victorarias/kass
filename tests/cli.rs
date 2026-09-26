@@ -70,7 +70,6 @@ impl FakeJev {
 struct Env {
     _dir: tempfile::TempDir,
     repo: PathBuf,
-    config: PathBuf,
     state: PathBuf,
 }
 
@@ -94,11 +93,11 @@ Is this doc stale?
 fn setup() -> Env {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().canonicalize().unwrap();
-    let (repo, config, state) = (base.join("repo"), base.join("config"), base.join("state"));
+    let (repo, state) = (base.join("repo"), base.join("state"));
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     std::fs::create_dir_all(repo.join("pkg")).unwrap();
-    std::fs::create_dir_all(config.join("rules")).unwrap();
-    std::fs::write(config.join("rules/tests.md"), RULES).unwrap();
+    std::fs::create_dir_all(repo.join(".kass/rules")).unwrap();
+    std::fs::write(repo.join(".kass/rules/tests.md"), RULES).unwrap();
     std::fs::write(
         repo.join("pkg/foo_test.go"),
         "func TestFoo(t *testing.T) { time.Sleep(time.Second) }",
@@ -108,7 +107,6 @@ fn setup() -> Env {
     Env {
         _dir: dir,
         repo,
-        config,
         state,
     }
 }
@@ -117,7 +115,6 @@ fn kass(env: &Env, jev: &FakeJev, key: bool, args: &[&str], stdin: Option<&str>)
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kass"));
     cmd.args(args)
         .current_dir(&env.repo)
-        .env("KASS_CONFIG_DIR", &env.config)
         .env("KASS_STATE_DIR", &env.state)
         .env("KASS_JEV_URL", &jev.url)
         .env_remove("TYPESAFE_API_KEY")
@@ -194,30 +191,6 @@ fn check_tiers_exit_code_and_records_stats() {
     );
     assert_eq!(rule(&s, "no-sleep")["violations"], 1);
     assert_eq!(rule(&s, "mock-only")["checks"], 1);
-}
-
-#[test]
-fn repo_rules_override_global_ones() {
-    let env = setup();
-    std::fs::create_dir_all(env.repo.join(".kass/rules")).unwrap();
-    std::fs::write(
-        env.repo.join(".kass/rules/r.md"),
-        "# no-sleep\nglobs: **/*_test.go\nfail: 0.99\n\nRepo version?",
-    )
-    .unwrap();
-    let jev = FakeJev::start(BTreeMap::from([("no-sleep", 0.97)]));
-    let out = kass(&env, &jev, true, &["check", "--all", "pkg"], None);
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-    let reqs = jev.requests.lock().unwrap();
-    assert_eq!(
-        reqs[0]["questions"]["no-sleep"]["instructions"],
-        "Repo version?"
-    );
 }
 
 #[test]

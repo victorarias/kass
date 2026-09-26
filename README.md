@@ -13,15 +13,14 @@ where some people have no key.
 
 ```sh
 cargo install --path .
-mkdir -p ~/.config/kass/rules && cp rules/*.md ~/.config/kass/rules/
+mkdir -p .kass/rules && cp <kass>/rules/*.md .kass/rules/   # in the repo to lint
 ```
 
 ## Rules
 
-Rules are `*.md` files in two places:
-
-- **Global:** `~/.config/kass/rules/` (or `$XDG_CONFIG_HOME/kass/rules/`).
-- **Repo:** `<repo>/.kass/rules/`. A repo rule replaces a global rule with the same id.
+Rules are `*.md` files in `<repo>/.kass/rules/`, committed with the code they
+judge. There are no global rules: each repo says what it cares about. Rule ids
+must be unique across the directory.
 
 ```md
 # test-waits-on-sleep
@@ -61,7 +60,7 @@ Each rule gets a probability of "yes":
 kass check [paths...]                    # changed files: staged, unstaged, untracked (git only)
 kass check --all [paths...]              # every file under paths (default: cwd), honoring .gitignore
            [--json] [--show-passes]      # exits 0 clean, 1 violations, 2 errors
-kass rules                               # rules in effect here and their sources
+kass rules                               # rules in effect here and their files
 kass stats [--global] [--json]           # recorded judgments for this repo (or all)
 kass hook claude                         # Claude Code PostToolUse hook (stdin JSON)
 ```
@@ -103,5 +102,4 @@ file-size limit (Jev's cap is 32k tokens for state plus the longest question).
 | `TYPESAFE_API_KEY` | required to call Jev |
 | `KASS_MODEL` | `jev-latest` |
 | `KASS_JEV_URL` | `https://api.typesafe.ai` |
-| `KASS_CONFIG_DIR` | `$XDG_CONFIG_HOME/kass` or `~/.config/kass` |
 | `KASS_STATE_DIR` | `$XDG_STATE_HOME/kass` or `~/.local/state/kass` |
