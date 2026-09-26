@@ -53,14 +53,14 @@ Each rule gets a probability of "yes":
 | --- | --- | --- |
 | violation | at or above `fail` | `kass check` exits 1; the hook blocks and tells the agent to fix it |
 | check | at or above `warn` | reported; the hook asks the agent to double-check |
-| pass | below `warn` | shown only with `--all` |
+| pass | below `warn` | shown only with `--show-passes` |
 
 ## Commands
 
 ```sh
-kass check [paths...] [--json] [--all]   # every file under paths (default: cwd), honoring .gitignore
-kass check --changed [paths...]          # only files differing from HEAD: staged, unstaged, untracked
-                                         # exits 0 clean, 1 violations, 2 errors
+kass check [paths...]                    # changed files: staged, unstaged, untracked (git only)
+kass check --all [paths...]              # every file under paths (default: cwd), honoring .gitignore
+           [--json] [--show-passes]      # exits 0 clean, 1 violations, 2 errors
 kass rules                               # rules in effect here and their sources
 kass stats [--global] [--json]           # recorded judgments for this repo (or all)
 kass hook claude                         # Claude Code PostToolUse hook (stdin JSON)

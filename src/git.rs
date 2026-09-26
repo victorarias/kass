@@ -7,7 +7,7 @@ use std::process::Command;
 pub fn changed_files(root: &Path) -> Result<Vec<String>> {
     if !root.join(".git").exists() {
         bail!(
-            "--changed needs a git repository, and {} is not one",
+            "{} is not a git repository, so kass cannot tell what changed; use `kass check --all`",
             root.display()
         );
     }

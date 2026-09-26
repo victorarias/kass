@@ -25,20 +25,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Judge files (or directories, honoring .gitignore) against the rules.
+    /// Judge changed files (staged, unstaged or untracked) against the rules.
     Check {
-        /// Files or directories; defaults to the current directory.
-        /// With --changed, limits the changed files to these paths.
+        /// Limit the check to these files or directories.
         paths: Vec<PathBuf>,
-        /// Judge only files that differ from HEAD: staged, unstaged or untracked.
+        /// Judge every file, changed or not, honoring .gitignore.
         #[arg(long)]
-        changed: bool,
+        all: bool,
         /// Print JSON instead of text.
         #[arg(long)]
         json: bool,
         /// Also print rules that passed.
         #[arg(long)]
-        all: bool,
+        show_passes: bool,
     },
     /// List the rules that apply here and where each comes from.
     Rules,
@@ -68,10 +67,10 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Check {
             paths,
-            changed,
-            json,
             all,
-        } => cmd_check(paths, changed, json, all),
+            json,
+            show_passes,
+        } => cmd_check(paths, all, json, show_passes),
         Command::Rules => cmd_rules(),
         Command::Stats { global, json } => cmd_stats(global, json),
         Command::Hook {
@@ -176,7 +175,12 @@ fn record_stats(ctx: &stats::RunContext, results: &[FileResult]) {
     }
 }
 
-fn cmd_check(paths: Vec<PathBuf>, changed: bool, as_json: bool, all: bool) -> Result<ExitCode> {
+fn cmd_check(
+    paths: Vec<PathBuf>,
+    all_files: bool,
+    as_json: bool,
+    show_passes: bool,
+) -> Result<ExitCode> {
     let client = client()?.with_context(|| {
         format!("{KEY_ENV} is not set; kass needs a TypeSafe API key to call Jev")
     })?;
@@ -190,7 +194,7 @@ fn cmd_check(paths: Vec<PathBuf>, changed: bool, as_json: bool, all: bool) -> Re
             root.join(".kass/rules").display()
         );
     }
-    let files = if changed {
+    let files = if !all_files {
         let scopes = paths
             .iter()
             .map(|p| relative(&root, &cwd.join(p)))
@@ -212,7 +216,7 @@ fn cmd_check(paths: Vec<PathBuf>, changed: bool, as_json: bool, all: bool) -> Re
         &stats::RunContext {
             caller: "cli",
             repo: root.display().to_string(),
-            tool: changed.then(|| "check --changed".into()),
+            tool: Some(if all_files { "check --all" } else { "check" }.into()),
             ..Default::default()
         },
         &results,
@@ -234,7 +238,7 @@ fn cmd_check(paths: Vec<PathBuf>, changed: bool, as_json: bool, all: bool) -> Re
     if as_json {
         println!("{}", serde_json::to_string_pretty(&results_json(&results))?);
     } else {
-        print_text(&results, all);
+        print_text(&results, show_passes);
         println!(
             "{} file(s) judged: {violations} violation(s), {checks} to double-check, {errors} error(s)",
             results.len()
@@ -265,13 +269,13 @@ fn results_json(results: &[FileResult]) -> Value {
         .collect()
 }
 
-fn print_text(results: &[FileResult], all: bool) {
+fn print_text(results: &[FileResult], show_passes: bool) {
     for r in results {
         match &r.outcome {
             FileOutcome::Judged { judgments, .. } => {
                 let shown: Vec<_> = judgments
                     .iter()
-                    .filter(|j| all || j.tier != Tier::Pass)
+                    .filter(|j| show_passes || j.tier != Tier::Pass)
                     .collect();
                 if shown.is_empty() {
                     continue;

@@ -160,7 +160,7 @@ fn rule<'a>(stats: &'a Value, id: &str) -> &'a Value {
 fn check_tiers_exit_code_and_records_stats() {
     let env = setup();
     let jev = FakeJev::start(BTreeMap::from([("no-sleep", 0.97), ("mock-only", 0.7)]));
-    let out = kass(&env, &jev, true, &["check"], None);
+    let out = kass(&env, &jev, true, &["check", "--all"], None);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(1), "{stdout}");
     assert!(stdout.contains("violation  no-sleep  p=0.97"), "{stdout}");
@@ -206,7 +206,7 @@ fn repo_rules_override_global_ones() {
     )
     .unwrap();
     let jev = FakeJev::start(BTreeMap::from([("no-sleep", 0.97)]));
-    let out = kass(&env, &jev, true, &["check", "pkg"], None);
+    let out = kass(&env, &jev, true, &["check", "--all", "pkg"], None);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -224,7 +224,7 @@ fn repo_rules_override_global_ones() {
 fn check_without_key_names_the_variable() {
     let env = setup();
     let jev = FakeJev::start(BTreeMap::new());
-    let out = kass(&env, &jev, false, &["check"], None);
+    let out = kass(&env, &jev, false, &["check", "--all"], None);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("TYPESAFE_API_KEY is not set"));
 }
@@ -234,7 +234,7 @@ fn api_errors_are_reported_and_recorded() {
     let env = setup();
     let jev = FakeJev::start(BTreeMap::new());
     jev.statuses.lock().unwrap().push_back(422);
-    let out = kass(&env, &jev, true, &["check"], None);
+    let out = kass(&env, &jev, true, &["check", "--all"], None);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(2), "{stdout}");
     assert!(stdout.contains("Jev returned HTTP 422"), "{stdout}");
@@ -246,7 +246,7 @@ fn overload_is_retried() {
     let env = setup();
     let jev = FakeJev::start(BTreeMap::new());
     jev.statuses.lock().unwrap().extend([529, 429]);
-    let out = kass(&env, &jev, true, &["check"], None);
+    let out = kass(&env, &jev, true, &["check", "--all"], None);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -412,7 +412,7 @@ fn changed_judges_staged_unstaged_and_untracked_files_only() {
         paths
     };
     assert_eq!(
-        judged(&["check", "--changed"]),
+        judged(&["check"]),
         [
             "other/new_test.go",
             "pkg/a_test.go",
@@ -421,7 +421,21 @@ fn changed_judges_staged_unstaged_and_untracked_files_only() {
         ]
     );
     assert_eq!(
-        judged(&["check", "--changed", "pkg"]),
+        judged(&["check", "pkg"]),
         ["pkg/a_test.go", "pkg/b_test.go", "pkg/renamed_test.go"]
+    );
+}
+
+#[test]
+fn default_check_outside_git_points_to_all() {
+    let env = setup();
+    std::fs::remove_dir_all(env.repo.join(".git")).unwrap();
+    let jev = FakeJev::start(BTreeMap::new());
+    let out = kass(&env, &jev, true, &["check"], None);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("is not a git repository") && stderr.contains("kass check --all"),
+        "{stderr}"
     );
 }
