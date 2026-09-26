@@ -16,4 +16,4 @@ Does a test in `content` only check something the type system or compiler alread
 # test-cannot-fail
 globs: **/*_test.go, **/*.test.ts, **/*.test.tsx, **/*.spec.ts, **/tests/**/*.rs, **/test_*.py, **/*_test.py
 
-Does a test in `content` have no assertion that could fail, for example it has no assertions at all, swallows errors, or asserts only that code ran without checking any result?
+Consider only test functions (Go `func TestXxx`, JS `it(...)`/`test(...)`). If `content` has none, answer no. Is there a test function that would still pass if the code it exercises returned wrong results, because it never checks any result or state?
