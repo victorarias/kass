@@ -58,7 +58,9 @@ Each rule gets a probability of "yes":
 ## Commands
 
 ```sh
-kass check [paths...] [--json] [--all]   # exits 0 clean, 1 violations, 2 errors
+kass check [paths...] [--json] [--all]   # every file under paths (default: cwd), honoring .gitignore
+kass check --changed [paths...]          # only files differing from HEAD: staged, unstaged, untracked
+                                         # exits 0 clean, 1 violations, 2 errors
 kass rules                               # rules in effect here and their sources
 kass stats [--global] [--json]           # recorded judgments for this repo (or all)
 kass hook claude                         # Claude Code PostToolUse hook (stdin JSON)

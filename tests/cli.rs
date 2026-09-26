@@ -347,3 +347,81 @@ fn hook_is_silent_without_key_or_matching_rules_or_on_errors() {
     }
     assert_eq!(stats(&env, &jev)["errors"], 1);
 }
+
+fn git(repo: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn changed_judges_staged_unstaged_and_untracked_files_only() {
+    let env = setup();
+    std::fs::remove_dir_all(env.repo.join(".git")).unwrap();
+    git(&env.repo, &["init", "-q"]);
+    for f in ["a", "b", "c", "clean", "old", "gone"] {
+        std::fs::write(env.repo.join(format!("pkg/{f}_test.go")), f).unwrap();
+    }
+    git(&env.repo, &["add", "."]);
+    git(
+        &env.repo,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    );
+    std::fs::write(env.repo.join("pkg/a_test.go"), "unstaged").unwrap();
+    std::fs::write(env.repo.join("pkg/b_test.go"), "staged").unwrap();
+    git(&env.repo, &["add", "pkg/b_test.go"]);
+    std::fs::create_dir_all(env.repo.join("other")).unwrap();
+    std::fs::write(env.repo.join("other/new_test.go"), "untracked").unwrap();
+    git(&env.repo, &["mv", "pkg/old_test.go", "pkg/renamed_test.go"]);
+    git(&env.repo, &["rm", "-q", "pkg/gone_test.go"]);
+
+    let jev = FakeJev::start(BTreeMap::new());
+    let judged = |args: &[&str]| {
+        jev.requests.lock().unwrap().clear();
+        let out = kass(&env, &jev, true, args, None);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut paths: Vec<String> = jev
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r["state"]["path"].as_str().unwrap().to_string())
+            .collect();
+        paths.sort();
+        paths
+    };
+    assert_eq!(
+        judged(&["check", "--changed"]),
+        [
+            "other/new_test.go",
+            "pkg/a_test.go",
+            "pkg/b_test.go",
+            "pkg/renamed_test.go"
+        ]
+    );
+    assert_eq!(
+        judged(&["check", "--changed", "pkg"]),
+        ["pkg/a_test.go", "pkg/b_test.go", "pkg/renamed_test.go"]
+    );
+}

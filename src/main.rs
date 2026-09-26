@@ -1,4 +1,5 @@
 mod check;
+mod git;
 mod jev;
 mod rules;
 mod stats;
@@ -27,7 +28,11 @@ enum Command {
     /// Judge files (or directories, honoring .gitignore) against the rules.
     Check {
         /// Files or directories; defaults to the current directory.
+        /// With --changed, limits the changed files to these paths.
         paths: Vec<PathBuf>,
+        /// Judge only files that differ from HEAD: staged, unstaged or untracked.
+        #[arg(long)]
+        changed: bool,
         /// Print JSON instead of text.
         #[arg(long)]
         json: bool,
@@ -61,7 +66,12 @@ enum Harness {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Check { paths, json, all } => cmd_check(paths, json, all),
+        Command::Check {
+            paths,
+            changed,
+            json,
+            all,
+        } => cmd_check(paths, changed, json, all),
         Command::Rules => cmd_rules(),
         Command::Stats { global, json } => cmd_stats(global, json),
         Command::Hook {
@@ -166,7 +176,7 @@ fn record_stats(ctx: &stats::RunContext, results: &[FileResult]) {
     }
 }
 
-fn cmd_check(paths: Vec<PathBuf>, as_json: bool, all: bool) -> Result<ExitCode> {
+fn cmd_check(paths: Vec<PathBuf>, changed: bool, as_json: bool, all: bool) -> Result<ExitCode> {
     let client = client()?.with_context(|| {
         format!("{KEY_ENV} is not set; kass needs a TypeSafe API key to call Jev")
     })?;
@@ -180,12 +190,29 @@ fn cmd_check(paths: Vec<PathBuf>, as_json: bool, all: bool) -> Result<ExitCode> 
             root.join(".kass/rules").display()
         );
     }
-    let files = collect_files(&root, &cwd, &paths)?;
+    let files = if changed {
+        let scopes = paths
+            .iter()
+            .map(|p| relative(&root, &cwd.join(p)))
+            .collect::<Result<Vec<_>>>()?;
+        git::changed_files(&root)?
+            .into_iter()
+            .filter(|f| {
+                scopes.is_empty()
+                    || scopes
+                        .iter()
+                        .any(|s| s.is_empty() || f == s || f.starts_with(&format!("{s}/")))
+            })
+            .collect()
+    } else {
+        collect_files(&root, &cwd, &paths)?
+    };
     let results = check::run(&client, &root, &files, &rules);
     record_stats(
         &stats::RunContext {
             caller: "cli",
             repo: root.display().to_string(),
+            tool: changed.then(|| "check --changed".into()),
             ..Default::default()
         },
         &results,
