@@ -103,10 +103,13 @@ fn state_dir() -> Result<PathBuf> {
 }
 
 /// The nearest ancestor holding `.git`, or `start` itself outside a repo.
+/// The nearest directory with its own `.kass`, so a package in a monorepo can
+/// keep its own rules; failing that, the git repository's top.
 fn repo_root(start: &Path) -> PathBuf {
     start
         .ancestors()
-        .find(|d| d.join(".git").exists())
+        .find(|d| d.join(".kass").is_dir())
+        .or_else(|| start.ancestors().find(|d| d.join(".git").exists()))
         .unwrap_or(start)
         .to_path_buf()
 }
@@ -264,7 +267,21 @@ fn count_label(results: &[FileResult]) -> String {
     let parts = results.iter().filter(outside).count();
     let tests = results.iter().filter(|r| r.unit.is_some()).count() - parts;
     let files = results.len() - tests - parts;
-    format!("{tests} test(s), {parts} part(s) outside any test and {files} whole file(s)")
+    let counts = [
+        (tests, "test(s)"),
+        (parts, "part(s) outside any test"),
+        (files, "whole file(s)"),
+    ];
+    let named: Vec<String> = counts
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, what)| format!("{n} {what}"))
+        .collect();
+    match named.as_slice() {
+        [] => "0 files".to_string(),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
 }
 
 fn omitted_note(r: &FileResult) -> String {
@@ -435,7 +452,7 @@ fn cmd_hook_claude() -> Result<ExitCode> {
     let root = repo_root(canon.parent().unwrap_or(&canon));
     let rel = relative(&root, &canon)?;
     let rules = rules::load(&rules_dir(&root))?;
-    let changed = if root.join(".git").exists() {
+    let changed = if git::prefix(&root).is_some() {
         Some(git::changed_lines(&root, std::slice::from_ref(&rel))?)
     } else {
         None

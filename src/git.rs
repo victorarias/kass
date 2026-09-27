@@ -2,19 +2,40 @@ use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
-/// Files that differ from HEAD and still exist: staged, unstaged and
-/// untracked (gitignored files excluded), as paths relative to `root`.
+/// Where `root` sits inside its git repository ("" at the top, "pkg/a/" in a
+/// subdirectory), or `None` outside one.
+pub fn prefix(root: &Path) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--show-prefix"])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Files under `root` that differ from HEAD and still exist: staged, unstaged
+/// and untracked (gitignored files excluded), as paths relative to `root`.
 pub fn changed_files(root: &Path) -> Result<Vec<String>> {
-    if !root.join(".git").exists() {
+    let Some(prefix) = prefix(root) else {
         bail!(
             "{} is not a git repository, so kass cannot tell what changed; use `kass check --all`",
             root.display()
         );
-    }
+    };
     let out = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+        .args([
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--",
+            ".",
+        ])
         .output()
         .context("running git status")?;
     if !out.status.success() {
@@ -23,8 +44,10 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>> {
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
+    // Porcelain paths are relative to the repository's top, not to `root`.
     Ok(parse_porcelain(&String::from_utf8_lossy(&out.stdout))
         .into_iter()
+        .filter_map(|p| p.strip_prefix(&prefix).map(str::to_string))
         .filter(|p| root.join(p).is_file())
         .collect())
 }
@@ -68,7 +91,15 @@ pub fn changed_lines(root: &Path, files: &[String]) -> Result<crate::check::Chan
     let diff = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["diff", "-U0", "--no-color", "--no-ext-diff", "HEAD", "--"])
+        .args([
+            "diff",
+            "-U0",
+            "--relative",
+            "--no-color",
+            "--no-ext-diff",
+            "HEAD",
+            "--",
+        ])
         .args(files)
         .output()
         .context("running git diff")?;

@@ -112,9 +112,20 @@ fn setup() -> Env {
 }
 
 fn kass(env: &Env, jev: &FakeJev, key: bool, args: &[&str], stdin: Option<&str>) -> Output {
+    kass_in(&env.repo, env, jev, key, args, stdin)
+}
+
+fn kass_in(
+    dir: &Path,
+    env: &Env,
+    jev: &FakeJev,
+    key: bool,
+    args: &[&str],
+    stdin: Option<&str>,
+) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_kass"));
     cmd.args(args)
-        .current_dir(&env.repo)
+        .current_dir(dir)
         .env("KASS_STATE_DIR", &env.state)
         .env("KASS_JEV_URL", &jev.url)
         .env_remove("TYPESAFE_API_KEY")
@@ -164,9 +175,7 @@ fn check_tiers_exit_code_and_records_stats() {
     assert!(stdout.contains("violation  no-sleep  p=0.97"), "{stdout}");
     assert!(stdout.contains("check      mock-only  p=0.70"), "{stdout}");
     assert!(
-        stdout.contains(
-            "1 test(s), 0 part(s) outside any test and 0 whole file(s) judged: 1 violation(s), 1 to double-check, 0 error(s)"
-        ),
+        stdout.contains("1 test(s) judged: 1 violation(s), 1 to double-check, 0 error(s)"),
         "{stdout}"
     );
 
@@ -567,4 +576,46 @@ fn changed_check_judges_only_tests_whose_lines_or_helpers_changed() {
         ["TestA"]
     );
     assert_eq!(run(HELPERS_TEST.to_string()), Vec::<String>::new());
+}
+
+#[test]
+fn a_nested_kass_directory_is_its_own_root_inside_the_repo() {
+    let env = setup();
+    std::fs::remove_dir_all(env.repo.join(".git")).unwrap();
+    let svc = env.repo.join("svc");
+    std::fs::create_dir_all(svc.join("pkg")).unwrap();
+    std::fs::create_dir_all(svc.join(".kass/rules")).unwrap();
+    std::fs::write(svc.join(".kass/rules/tests.md"), RULES).unwrap();
+    std::fs::write(env.repo.join("pkg/foo_test.go"), HELPERS_TEST).unwrap();
+    std::fs::write(svc.join("pkg/foo_test.go"), HELPERS_TEST).unwrap();
+    git(&env.repo, &["init", "-q"]);
+    git(&env.repo, &["add", "."]);
+    git(
+        &env.repo,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    );
+    let changed = HELPERS_TEST.replace("got != 1", "got != 2");
+    std::fs::write(env.repo.join("pkg/foo_test.go"), &changed).unwrap();
+    std::fs::write(svc.join("pkg/foo_test.go"), &changed).unwrap();
+
+    let jev = FakeJev::start(BTreeMap::new());
+    let out = kass_in(&svc.join("pkg"), &env, &jev, true, &["check"], None);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        judged_tests(&jev),
+        [("pkg/foo_test.go".to_string(), "TestB".to_string(), vec![])]
+    );
 }
