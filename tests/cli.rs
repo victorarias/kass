@@ -160,10 +160,13 @@ fn check_tiers_exit_code_and_records_stats() {
     let out = kass(&env, &jev, true, &["check", "--all"], None);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(1), "{stdout}");
+    assert!(stdout.contains("pkg/foo_test.go:1 TestFoo\n"), "{stdout}");
     assert!(stdout.contains("violation  no-sleep  p=0.97"), "{stdout}");
     assert!(stdout.contains("check      mock-only  p=0.70"), "{stdout}");
     assert!(
-        stdout.contains("1 file(s) judged: 1 violation(s), 1 to double-check, 0 error(s)"),
+        stdout.contains(
+            "1 test(s) and 0 whole file(s) judged: 1 violation(s), 1 to double-check, 0 error(s)"
+        ),
         "{stdout}"
     );
 
@@ -248,9 +251,12 @@ fn hook_blocks_on_violations_and_records_the_session() {
     let resp: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(resp["decision"], "block");
     let reason = resp["reason"].as_str().unwrap();
-    assert!(reason.contains("- no-sleep (p=0.97)"), "{reason}");
     assert!(
-        reason.contains("Double-check each") && reason.contains("- mock-only (p=0.70)"),
+        reason.contains("- pkg/foo_test.go:1 TestFoo: no-sleep (p=0.97)"),
+        "{reason}"
+    );
+    assert!(
+        reason.contains("Double-check each") && reason.contains("TestFoo: mock-only (p=0.70)"),
         "{reason}"
     );
 
@@ -411,4 +417,137 @@ fn default_check_outside_git_points_to_all() {
         stderr.contains("is not a git repository") && stderr.contains("kass check --all"),
         "{stderr}"
     );
+}
+
+const HELPERS_TEST: &str = "package pkg
+
+func waitReady(t *testing.T) { time.Sleep(time.Second) }
+
+func TestA(t *testing.T) {
+	waitReady(t)
+}
+
+func TestB(t *testing.T) {
+	if got := 1; got != 1 {
+		t.Fatal(got)
+	}
+}
+";
+
+fn judged_tests(jev: &FakeJev) -> Vec<(String, String, Vec<String>)> {
+    let mut out: Vec<_> = jev
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let s = &r["state"];
+            let helpers = s["helpers"]
+                .as_array()
+                .map(|h| {
+                    h.iter()
+                        .map(|h| h["name"].as_str().unwrap().to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            (
+                s["path"].as_str().unwrap().to_string(),
+                s["test"].as_str().unwrap_or("<file>").to_string(),
+                helpers,
+            )
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+#[test]
+fn each_test_is_judged_alone_with_the_helpers_it_calls() {
+    let env = setup();
+    std::fs::write(env.repo.join("pkg/foo_test.go"), HELPERS_TEST).unwrap();
+    std::fs::write(
+        env.repo.join("pkg/helpers_test.go"),
+        "package pkg\n\nfunc unusedHelper() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        env.repo.join("pkg/main_test.go"),
+        "package pkg\n\nfunc TestMain(m *testing.M) { m.Run() }\n",
+    )
+    .unwrap();
+    let jev = FakeJev::start(BTreeMap::new());
+    let out = kass(&env, &jev, true, &["check", "--all", "--json"], None);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        judged_tests(&jev),
+        [
+            (
+                "pkg/foo_test.go".into(),
+                "TestA".into(),
+                vec!["waitReady".to_string()]
+            ),
+            ("pkg/foo_test.go".into(), "TestB".into(), vec![]),
+            ("pkg/helpers_test.go".into(), "<file>".into(), vec![]),
+            ("pkg/main_test.go".into(), "<file>".into(), vec![]),
+        ]
+    );
+    let json: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let a = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["test"] == "TestA")
+        .unwrap();
+    assert_eq!(
+        (a["line"].as_i64(), a["helpers"].as_i64()),
+        (Some(5), Some(1))
+    );
+}
+
+#[test]
+fn changed_check_judges_only_tests_whose_lines_or_helpers_changed() {
+    let env = setup();
+    std::fs::remove_dir_all(env.repo.join(".git")).unwrap();
+    std::fs::write(env.repo.join("pkg/foo_test.go"), HELPERS_TEST).unwrap();
+    git(&env.repo, &["init", "-q"]);
+    git(&env.repo, &["add", "."]);
+    git(
+        &env.repo,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    );
+    let jev = FakeJev::start(BTreeMap::new());
+    let run = |content: String| {
+        std::fs::write(env.repo.join("pkg/foo_test.go"), content).unwrap();
+        jev.requests.lock().unwrap().clear();
+        let out = kass(&env, &jev, true, &["check"], None);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        judged_tests(&jev)
+            .into_iter()
+            .map(|(_, t, _)| t)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(run(HELPERS_TEST.replace("got != 1", "got != 2")), ["TestB"]);
+    assert_eq!(
+        run(HELPERS_TEST.replace("time.Second", "time.Minute")),
+        ["TestA"]
+    );
+    assert_eq!(run(HELPERS_TEST.to_string()), Vec::<String>::new());
 }

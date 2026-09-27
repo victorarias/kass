@@ -38,11 +38,31 @@ Does a test in `content` wait for something by sleeping instead of on a real sig
 - **Question:** after a blank line, the question. Write it so that "yes" means
   the rule is broken.
 
-Jev receives `{"path": ..., "content": ...}` as its state, so a question can
-refer to `content`. All rules matching a file go in one request.
+All rules matching a file go in one request. Keep each rule narrow and
+judgeable from the state alone.
 
-Keep each rule narrow and judgeable from the file alone. Jev is fast and
-calibrated, but it can't reason about other files.
+## What Jev sees
+
+For Go, TypeScript and JavaScript, kass parses the file with tree-sitter and
+sends one request per test, so a large file never overflows Jev's context and
+one bad test doesn't dilute the score of the others:
+
+```json
+{"path": "pkg/foo_test.go", "test": "TestFoo", "content": "func TestFoo(...) {...}",
+ "helpers": [{"name": "waitReady", "path": "pkg/util_test.go", "code": "func waitReady(...) {...}"}]}
+```
+
+- **Tests:** Go `func TestXxx`; JS `it`/`test` calls, named by their `describe`
+  path (Playwright's `test.describe` and `test.step` included).
+- **Helpers:** every declaration the test reaches, transitively: functions,
+  types, vars and consts from the same file, JS `beforeEach`/`afterEach` hooks
+  and enclosing `describe` scopes, and for Go, other `_test.go` files in the package.
+  Helpers that would push the state past 60KB are left out and counted.
+- **Changed tests only:** `kass check` and the hook judge a test only when its
+  lines, or a same-file helper's lines, changed since HEAD. `--all` judges every test.
+
+Any other file, or a file with no tests kass can find, is sent whole as
+`{"path": ..., "content": ...}`. Either way a question can refer to `content`.
 
 ## Tiers
 
@@ -88,8 +108,9 @@ Every run is written to `~/.local/state/kass/stats.db` (SQLite, or
 `$XDG_STATE_HOME/kass/`, or `KASS_STATE_DIR`). There are three tables:
 
 - **`runs`:** who ran kass. Hook runs record the harness, session id and triggering tool.
-- **`requests`:** one per file, with bytes, latency, Jev model version, input tokens, and any error.
-- **`judgments`:** one per rule per file, with probability, tier, thresholds, and
+- **`requests`:** one per test (or whole file), with the test's name and line,
+  helpers sent and omitted, bytes, latency, Jev model version, input tokens, and any error.
+- **`judgments`:** one per rule per request, with probability, tier, thresholds, and
   a hash of the rule, so a stat can be traced to the exact rule text.
 
 `kass stats` summarizes them. "Tokens per KiB" is the receipt for any future

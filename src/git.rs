@@ -46,9 +46,86 @@ fn parse_porcelain(out: &str) -> Vec<String> {
     paths
 }
 
+/// Line ranges each file changed relative to HEAD, from `git diff -U0`.
+/// Files absent from the diff (untracked, or no HEAD yet) map to `None`:
+/// every line counts as changed.
+pub fn changed_lines(root: &Path, files: &[String]) -> Result<crate::check::ChangedLines> {
+    let mut out: crate::check::ChangedLines = files.iter().map(|f| (f.clone(), None)).collect();
+    if files.is_empty() {
+        return Ok(out);
+    }
+    let has_head = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+        .output()
+        .context("running git rev-parse")?
+        .status
+        .success();
+    if !has_head {
+        return Ok(out);
+    }
+    let diff = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["diff", "-U0", "--no-color", "--no-ext-diff", "HEAD", "--"])
+        .args(files)
+        .output()
+        .context("running git diff")?;
+    if !diff.status.success() {
+        bail!(
+            "git diff failed: {}",
+            String::from_utf8_lossy(&diff.stderr).trim()
+        );
+    }
+    for (path, ranges) in parse_diff(&String::from_utf8_lossy(&diff.stdout)) {
+        if let Some(entry) = out.get_mut(&path) {
+            *entry = Some(ranges);
+        }
+    }
+    Ok(out)
+}
+
+/// New-side line ranges per file from a `-U0` diff. A pure deletion marks the
+/// lines on either side of the cut.
+fn parse_diff(diff: &str) -> Vec<(String, Vec<(usize, usize)>)> {
+    let mut out: Vec<(String, Vec<(usize, usize)>)> = Vec::new();
+    for line in diff.lines() {
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            out.push((path.to_string(), Vec::new()));
+        } else if let Some(hunk) = line.strip_prefix("@@ ") {
+            let Some(new) = hunk.split(' ').find_map(|p| p.strip_prefix('+')) else {
+                continue;
+            };
+            let (start, count) = match new.split_once(',') {
+                Some((s, c)) => (s.parse().unwrap_or(0), c.parse().unwrap_or(0)),
+                None => (new.parse().unwrap_or(0), 1),
+            };
+            let range = if count == 0 {
+                (start.max(1), start + 1)
+            } else {
+                (start, start + count - 1)
+            };
+            if let Some((_, ranges)) = out.last_mut() {
+                ranges.push(range);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diff_hunks_become_new_side_ranges() {
+        let diff = "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -3 +3 @@ x\n-a\n+b\n@@ -10,0 +11,4 @@\n+x\n@@ -20,2 +24,0 @@\n-y\n";
+        assert_eq!(
+            parse_diff(diff),
+            [("a.go".to_string(), vec![(3, 3), (11, 14), (24, 25)])]
+        );
+    }
 
     #[test]
     fn parses_all_change_kinds_and_skips_rename_sources() {

@@ -39,6 +39,14 @@ CREATE TABLE judgments (
 CREATE INDEX judgments_rule ON judgments(rule_id);
 ";
 
+// Version 2: requests judge one test at a time, with the helpers it calls.
+const MIGRATE_V2: &str = "
+ALTER TABLE requests ADD COLUMN test TEXT;       -- NULL when the whole file was sent
+ALTER TABLE requests ADD COLUMN line INTEGER;
+ALTER TABLE requests ADD COLUMN helpers INTEGER;
+ALTER TABLE requests ADD COLUMN helpers_omitted INTEGER;
+";
+
 #[derive(Default)]
 pub struct RunContext {
     pub caller: &'static str,
@@ -55,8 +63,13 @@ pub fn open(dir: &Path) -> Result<Connection> {
     let conn = Connection::open(&path).with_context(|| format!("opening {}", path.display()))?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version == 0 {
+    if version < 1 {
         conn.execute_batch(&format!("BEGIN; {SCHEMA} PRAGMA user_version = 1; COMMIT;"))?;
+    }
+    if version < 2 {
+        conn.execute_batch(&format!(
+            "BEGIN; {MIGRATE_V2} PRAGMA user_version = 2; COMMIT;"
+        ))?;
     }
     Ok(conn)
 }
@@ -70,40 +83,48 @@ pub fn record(conn: &mut Connection, ctx: &RunContext, results: &[FileResult]) -
     )?;
     let run_id = tx.last_insert_rowid();
     for r in results {
-        match &r.outcome {
+        let (test, line) = (
+            r.unit.as_ref().map(|u| &u.name),
+            r.unit.as_ref().map(|u| u.line as i64),
+        );
+        let (helpers, omitted) = (r.helpers as i64, r.helpers_omitted as i64);
+        let (latency_ms, model, input_tokens, error, judgments) = match &r.outcome {
             FileOutcome::Judged {
                 model,
                 input_tokens,
                 latency_ms,
                 judgments,
-            } => {
-                tx.execute(
-                    "INSERT INTO requests (run_id, path, bytes, latency_ms, jev_model, input_tokens) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![run_id, r.path, r.bytes, latency_ms, model, input_tokens],
-                )?;
-                let request_id = tx.last_insert_rowid();
-                for j in judgments {
-                    tx.execute(
-                        "INSERT INTO judgments VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                        params![
-                            request_id,
-                            j.rule.id,
-                            j.rule.hash,
-                            j.rule.source.display().to_string(),
-                            j.probability,
-                            j.tier.as_str(),
-                            j.rule.fail,
-                            j.rule.warn
-                        ],
-                    )?;
-                }
-            }
+            } => (
+                Some(*latency_ms),
+                Some(model.as_str()),
+                *input_tokens,
+                None,
+                judgments.as_slice(),
+            ),
             FileOutcome::Failed { error, latency_ms } => {
-                tx.execute(
-                    "INSERT INTO requests (run_id, path, bytes, latency_ms, error) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![run_id, r.path, r.bytes, latency_ms, error],
-                )?;
+                (*latency_ms, None, None, Some(error.as_str()), &[][..])
             }
+        };
+        tx.execute(
+            "INSERT INTO requests (run_id, path, bytes, latency_ms, jev_model, input_tokens, error, test, line, helpers, helpers_omitted)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![run_id, r.path, r.bytes, latency_ms, model, input_tokens, error, test, line, helpers, omitted],
+        )?;
+        let request_id = tx.last_insert_rowid();
+        for j in judgments {
+            tx.execute(
+                "INSERT INTO judgments VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    request_id,
+                    j.rule.id,
+                    j.rule.hash,
+                    j.rule.source.display().to_string(),
+                    j.probability,
+                    j.tier.as_str(),
+                    j.rule.fail,
+                    j.rule.warn
+                ],
+            )?;
         }
     }
     tx.commit()?;
@@ -145,7 +166,7 @@ pub fn summarize(conn: &Connection, repo: Option<&str>) -> Result<Summary> {
     )?;
     let (requests, errors, bytes_max, input_tokens_max, tokens_per_kib) = conn.query_row(
         &format!(
-            "SELECT count(*), count(error), max(bytes), max(input_tokens),
+            "SELECT count(*), count(error), max(CASE WHEN error IS NULL THEN bytes END), max(input_tokens),
                     1024.0 * sum(input_tokens) / nullif(sum(CASE WHEN input_tokens IS NOT NULL THEN bytes END), 0)
              FROM requests WHERE run_id IN {runs_filter}"
         ),

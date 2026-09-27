@@ -3,6 +3,7 @@ mod git;
 mod jev;
 mod rules;
 mod stats;
+mod units;
 
 use anyhow::{Context, Result, bail};
 use check::{FileOutcome, FileResult};
@@ -203,7 +204,12 @@ fn cmd_check(
     } else {
         collect_files(&root, &cwd, &paths)?
     };
-    let results = check::run(&client, &root, &files, &rules);
+    let changed = if all_files {
+        None
+    } else {
+        Some(git::changed_lines(&root, &files)?)
+    };
+    let results = check::run(&client, &root, &files, &rules, changed.as_ref());
     record_stats(
         &stats::RunContext {
             caller: "cli",
@@ -232,8 +238,8 @@ fn cmd_check(
     } else {
         print_text(&results, show_passes);
         println!(
-            "{} file(s) judged: {violations} violation(s), {checks} to double-check, {errors} error(s)",
-            results.len()
+            "{} judged: {violations} violation(s), {checks} to double-check, {errors} error(s)",
+            count_label(&results)
         );
     }
     Ok(if errors > 0 {
@@ -245,18 +251,58 @@ fn cmd_check(
     })
 }
 
+/// `path:line test name` for a test, or the path for a whole file.
+fn label(r: &FileResult) -> String {
+    match &r.unit {
+        Some(u) => format!("{}:{} {}", r.path, u.line, u.name),
+        None => r.path.clone(),
+    }
+}
+
+fn count_label(results: &[FileResult]) -> String {
+    let tests = results.iter().filter(|r| r.unit.is_some()).count();
+    let files = results.len() - tests;
+    format!("{tests} test(s) and {files} whole file(s)")
+}
+
+fn omitted_note(r: &FileResult) -> String {
+    if r.helpers_omitted == 0 {
+        return String::new();
+    }
+    format!(
+        " ({} of {} helpers omitted: over the {}KB state budget)",
+        r.helpers_omitted,
+        r.helpers + r.helpers_omitted,
+        check::STATE_BUDGET_BYTES / 1024
+    )
+}
+
 fn results_json(results: &[FileResult]) -> Value {
     results
         .iter()
-        .map(|r| match &r.outcome {
-            FileOutcome::Judged { model, input_tokens, latency_ms, judgments } => json!({
-                "path": r.path, "bytes": r.bytes, "model": model, "input_tokens": input_tokens, "latency_ms": latency_ms,
-                "judgments": judgments.iter().map(|j| json!({
-                    "rule": j.rule.id, "probability": j.probability, "tier": j.tier.as_str(),
-                    "fail": j.rule.fail, "warn": j.rule.warn,
-                })).collect::<Vec<_>>(),
-            }),
-            FileOutcome::Failed { error, .. } => json!({"path": r.path, "bytes": r.bytes, "error": error}),
+        .map(|r| {
+            let mut v = match &r.outcome {
+                FileOutcome::Judged {
+                    model,
+                    input_tokens,
+                    latency_ms,
+                    judgments,
+                } => json!({
+                    "model": model, "input_tokens": input_tokens, "latency_ms": latency_ms,
+                    "judgments": judgments.iter().map(|j| json!({
+                        "rule": j.rule.id, "probability": j.probability, "tier": j.tier.as_str(),
+                        "fail": j.rule.fail, "warn": j.rule.warn,
+                    })).collect::<Vec<_>>(),
+                }),
+                FileOutcome::Failed { error, .. } => json!({"error": error}),
+            };
+            v["path"] = json!(r.path);
+            v["test"] = json!(r.unit.as_ref().map(|u| &u.name));
+            v["line"] = json!(r.unit.as_ref().map(|u| u.line));
+            v["bytes"] = json!(r.bytes);
+            v["helpers"] = json!(r.helpers);
+            v["helpers_omitted"] = json!(r.helpers_omitted);
+            v
         })
         .collect()
 }
@@ -272,7 +318,7 @@ fn print_text(results: &[FileResult], show_passes: bool) {
                 if shown.is_empty() {
                     continue;
                 }
-                println!("{}", r.path);
+                println!("{}{}", label(r), omitted_note(r));
                 for j in shown {
                     let line = match j.tier {
                         Tier::Violation => format!("fail >= {:.2}", j.rule.fail),
@@ -286,7 +332,7 @@ fn print_text(results: &[FileResult], show_passes: bool) {
                     );
                 }
             }
-            FileOutcome::Failed { error, .. } => println!("{}\n  error      {error}", r.path),
+            FileOutcome::Failed { error, .. } => println!("{}\n  error      {error}", label(r)),
         }
     }
 }
@@ -346,7 +392,7 @@ fn cmd_stats(global: bool, as_json: bool) -> Result<ExitCode> {
         opt(s.latency_ms_max)
     );
     println!(
-        "largest file {} bytes, {} input tokens; {} tokens per KiB",
+        "largest request judged {} bytes, {} input tokens; {} tokens per KiB",
         opt(s.bytes_max),
         opt(s.input_tokens_max),
         s.tokens_per_kib.map_or("-".into(), |v| format!("{v:.0}"))
@@ -387,7 +433,12 @@ fn cmd_hook_claude() -> Result<ExitCode> {
     let root = repo_root(canon.parent().unwrap_or(&canon));
     let rel = relative(&root, &canon)?;
     let rules = rules::load(&rules_dir(&root))?;
-    let results = check::run(&client, &root, &[rel], &rules);
+    let changed = if root.join(".git").exists() {
+        Some(git::changed_lines(&root, std::slice::from_ref(&rel))?)
+    } else {
+        None
+    };
+    let results = check::run(&client, &root, &[rel], &rules, changed.as_ref());
     if results.is_empty() {
         return Ok(ExitCode::SUCCESS);
     }
@@ -403,46 +454,46 @@ fn cmd_hook_claude() -> Result<ExitCode> {
         },
         &results,
     );
-    if let Some(out) = claude_hook_output(&results[0]) {
+    if let Some(out) = claude_hook_output(&results) {
         println!("{out}");
     }
     Ok(ExitCode::SUCCESS)
 }
 
-fn claude_hook_output(result: &FileResult) -> Option<Value> {
-    let FileOutcome::Judged { judgments, .. } = &result.outcome else {
-        if let FileOutcome::Failed { error, .. } = &result.outcome {
-            eprintln!("kass: {}: {error}", result.path);
+fn claude_hook_output(results: &[FileResult]) -> Option<Value> {
+    let mut violations = Vec::new();
+    let mut checks = Vec::new();
+    for r in results {
+        match &r.outcome {
+            FileOutcome::Failed { error, .. } => eprintln!("kass: {}: {error}", label(r)),
+            FileOutcome::Judged { judgments, .. } => {
+                for j in judgments {
+                    let line = format!(
+                        "- {}: {} (p={:.2}): {}",
+                        label(r),
+                        j.rule.id,
+                        j.probability,
+                        j.rule.question.replace('\n', " ")
+                    );
+                    match j.tier {
+                        Tier::Violation => violations.push(line),
+                        Tier::Check => checks.push(line),
+                        Tier::Pass => {}
+                    }
+                }
+            }
         }
-        return None;
-    };
-    let lines = |tier: Tier| {
-        judgments
-            .iter()
-            .filter(|j| j.tier == tier)
-            .map(|j| {
-                format!(
-                    "- {} (p={:.2}): {}",
-                    j.rule.id,
-                    j.probability,
-                    j.rule.question.replace('\n', " ")
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    let (violations, checks) = (lines(Tier::Violation), lines(Tier::Check));
+    }
     let mut text = String::new();
     if !violations.is_empty() {
         text += &format!(
-            "kass found likely rule violations in {}. Fix them:\n{}\n",
-            result.path,
+            "kass found likely rule violations. Fix them:\n{}\n",
             violations.join("\n")
         );
     }
     if !checks.is_empty() {
         text += &format!(
-            "kass is unsure about these rules in {}. Double-check each; if the code is fine, carry on:\n{}\n",
-            result.path,
+            "kass is unsure about these. Double-check each; if the code is fine, carry on:\n{}\n",
             checks.join("\n")
         );
     }

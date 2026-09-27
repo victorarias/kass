@@ -84,6 +84,11 @@ impl Client {
             }
             if !resp.status().is_success() {
                 let text = resp.text().unwrap_or_default();
+                if text.contains("max_tokens_exceeded") {
+                    bail!(
+                        "state too large for Jev, which accepts 32k tokens of state plus the longest question: {text}"
+                    );
+                }
                 bail!(
                     "Jev returned HTTP {status} after {} attempt(s): {text}",
                     attempt + 1
