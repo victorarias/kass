@@ -8,16 +8,17 @@
   <img src="docs/demo.gif" alt="kass catching a test that sleeps, then an agent fixing it after the hook tells it" width="800">
 </p>
 
-Some code smells are obvious to a person and painful to express as a regex: a
-test that waits by sleeping, a test that only checks its own mocks, a test that
-can't fail. kass lets you write those rules as yes/no questions in markdown,
-and asks [Jev](https://docs.typesafe.ai) (TypeSafe's small, calibrated
-judgment model) to answer each one with a probability, in about 300ms.
+Some code smells are easy to spot and miserable to catch with a regex. A test
+that waits by sleeping. A test that only checks its own mocks. A test that
+can't fail. With kass you write each one as a yes/no question in markdown, and
+[Jev](https://docs.typesafe.ai), TypeSafe's small judgment model, answers it
+with a probability in about 300ms.
 
-It's built for the loop where agents write most of the code: run it by hand,
-in CI, or as a Claude Code hook so the agent hears about a smell the moment it
-writes one. And every judgment lands in SQLite, so you can tell later which
-rules earn their keep.
+On my main project, the sleep rule flags 40 test files.
+
+Run it by hand, in CI, or as a Claude Code hook, so the agent hears about a
+smell right after it writes one. kass records every judgment in SQLite too, so
+you can check later which rules earn their keep.
 
 ## Getting started
 
@@ -36,20 +37,20 @@ kass check          # what changed since HEAD (staged, unstaged, untracked)
 kass check --all    # everything
 ```
 
-That's it! [`rules/test-smells.md`](rules/test-smells.md) is a starter pack of
-four test rules. Keep the ones that fit, rewrite the rest, add your own.
+That's it! [`rules/test-smells.md`](rules/test-smells.md) has four test rules
+to start from. Keep what fits and rewrite the rest.
 
 ## Examples
 
-Both examples are in [`examples/`](examples) with their rules, so you can run
-them yourself (`cd examples/go-worker && kass check --all`).
+Both examples live in [`examples/`](examples) with their rules, so you can run
+them yourself: `cd examples/go-worker && kass check --all`.
 
-### A Go test that sleeps, hidden in a helper
+### A Go test that sleeps inside a helper
 
-[`examples/go-worker`](examples/go-worker/worker_test.go) has a test that
-waits for a worker pool with `waitForJobs()`, a helper at the bottom of the
-file that calls `time.Sleep`. The test itself never sleeps, so kass sends the
-test together with every helper it reaches:
+In [`examples/go-worker`](examples/go-worker/worker_test.go), a test waits for
+a worker pool by calling `waitForJobs()`. That helper sits at the bottom of the
+file and calls `time.Sleep`. The test body never sleeps, which is why kass
+sends each test along with every helper it calls:
 
 ```
 $ kass check --all
@@ -58,8 +59,8 @@ worker_test.go:9 TestPoolRunsEveryJob
 3 test(s) judged: 1 violation(s), 0 to double-check, 0 error(s)
 ```
 
-Swap `waitForJobs()` for `<-p.Done()` and it comes back clean. The same test
-file has `TestPoolDrainsOnClose`, which already waits the right way.
+Swap `waitForJobs()` for `<-p.Done()` and it comes back clean. The same file
+has `TestPoolDrainsOnClose`, which already waits on `Done()`.
 
 ### A TypeScript test that can't fail
 
@@ -76,7 +77,7 @@ cart.test.ts:24 Cart > totals an empty cart
 ### Your agent, as it writes
 
 As a Claude Code `PostToolUse` hook, kass judges the file the agent just
-edited and hands violations straight back to it:
+edited and sends violations back to it:
 
 ```json
 {
@@ -88,8 +89,9 @@ edited and hands violations straight back to it:
 ## Writing rules
 
 Rules are `*.md` files in `.kass/rules/`, committed next to the code they
-judge. There are no global rules: each repo says what it cares about. The
-nearest `.kass` directory wins, so a package in a monorepo can keep its own.
+judge. Each repo keeps its own, and there's no global rules file. kass reads
+the nearest `.kass` directory, so a package in a monorepo can have its own
+rules too.
 
 ```md
 # test-waits-on-sleep
@@ -102,21 +104,21 @@ polling in a loop with a timer, instead of waiting on a real signal such as a
 channel, event, callback, or returned value?
 ```
 
-- **Heading:** `# <id>`, lowercase letters, digits and dashes. Ids are unique per directory.
-- **Key lines** follow the heading directly:
-  - `globs:` (required) are relative to the directory holding `.kass`.
-  - `fail` and `warn` are optional thresholds (defaults 0.85 and 0.6).
-- **Question:** after a blank line. Write it so "yes" means the rule is broken.
+A rule starts with `# <id>`, in lowercase letters, digits and dashes, unique
+within the directory. The `key: value` lines come right after the heading.
+`globs` is required and relative to the directory holding `.kass`. `fail` and
+`warn` are optional thresholds, 0.85 and 0.6 by default. After a blank line
+comes the question, phrased so that "yes" means the rule is broken.
 
-A few things we learned writing them:
+A few things I learned writing them:
 
-- One narrow judgment per rule. "Is this test bad?" gets you noise.
-- Say what to do when the thing isn't there. Our first `test-cannot-fail`
-  flagged files with no tests at all, until the question said "If `content`
-  has none, answer no".
-- Refer to the state by name (`content`), so Jev knows what you mean.
+- Ask one narrow thing per rule. "Is this test bad?" gets you noise.
+- Say what to answer when the thing isn't there. My first `test-cannot-fail`
+  flagged files with no tests in them until I added "If `content` has none,
+  answer no".
+- Call the state by its field name (`content`), so Jev knows what you mean.
 
-Each rule gets a probability of "yes", and a tier:
+Jev returns the probability of "yes" for each rule, and kass puts it in a tier:
 
 | Tier | When | What happens |
 | --- | --- | --- |
@@ -127,31 +129,35 @@ Each rule gets a probability of "yes", and a tier:
 ## What Jev sees
 
 For Go, TypeScript and JavaScript, kass parses each file with tree-sitter and
-sends one request per test. A big test file never overflows Jev's context, and
-one bad test doesn't drown in the good ones around it.
+sends one request per test. A 170KB test file fits fine this way, and one bad
+test gets its own score instead of blending into the good ones around it.
 
 ```json
 {"path": "worker_test.go", "test": "TestPoolRunsEveryJob", "content": "func TestPoolRunsEveryJob(...) {...}",
  "helpers": [{"name": "waitForJobs", "path": "worker_test.go", "code": "func waitForJobs() {...}"}]}
 ```
 
-- **Tests** kass recognizes:
-  - Go: `func TestXxx`, testify suite methods, and Ginkgo `It`/`Specify`/`DescribeTable`.
-  - JS: `it`/`test`/`specify` from Jest, Vitest, Jasmine, mocha, node:test,
-    ava and Playwright, including `.only`/`.skip`/`.each`, `fit`/`xit` and
-    `test.describe`. They're named by their `describe` path, like `Cart > totals an empty cart`.
-- **Helpers:** every declaration the test reaches, followed transitively by
-  name. That's functions, types, vars and consts in the file, setup hooks
-  (`beforeEach`, `SetupTest`, Ginkgo's `BeforeEach`) and the blocks around the
-  test, plus other `_test.go` files in a Go package. Helpers past a 60KB
-  budget are left out, and the output says how many.
-- **Outside any test:** code no recognized test contains or reaches (a test
-  library kass doesn't know, a helper only other files use) goes in its own
-  request, labeled `outside any test (N lines)`. Nothing goes unjudged.
-- **Only what changed:** `kass check` judges a test when its lines, or a
-  helper's lines in the same file, changed since HEAD. `--all` judges everything.
+In Go, kass finds `func TestXxx`, testify suite methods, and Ginkgo's
+`It`, `Specify` and `DescribeTable`. In JS it finds `it`, `test` and `specify`
+from Jest, Vitest, Jasmine, mocha, node:test, ava and Playwright, including
+`.only`, `.skip`, `.each`, `fit`, `xit` and `test.describe`. JS tests are named
+by their `describe` path, like `Cart > totals an empty cart`.
 
-Any other file is sent whole, as `{"path": ..., "content": ...}`.
+Helpers are every declaration the test reaches, followed by name through
+whatever those declarations call. That covers functions, types, vars and
+consts in the file, setup hooks like `beforeEach`, testify's `SetupTest` and
+Ginkgo's `BeforeEach`, and in Go, the other `_test.go` files in the package.
+kass drops helpers once a request passes 60KB and tells you how many it left
+out.
+
+Code that no recognized test contains or calls goes in its own request,
+labeled `outside any test (N lines)`. That's where a test library kass doesn't
+know ends up, and helpers that only other files use. So it all gets judged
+somewhere.
+
+`kass check` judges a test when its lines, or a same-file helper's lines,
+changed since HEAD. `--all` judges everything. Any other file goes whole, as
+`{"path": ..., "content": ...}`.
 
 ## Commands
 
@@ -167,7 +173,7 @@ kass hook claude                # Claude Code PostToolUse hook (reads the event 
 
 ## Claude Code hook
 
-Add this to `.claude/settings.json` (the repo's) or `~/.claude/settings.json`:
+Add this to the repo's `.claude/settings.json` or to `~/.claude/settings.json`:
 
 ```json
 {
@@ -180,30 +186,31 @@ Add this to `.claude/settings.json` (the repo's) or `~/.claude/settings.json`:
 ```
 
 The hook fails open. With no key, no matching rule, or Jev down, the edit goes
-through untouched, and errors still land in stats. So it's safe to commit the
-hook for a team where not everyone has a key.
+through untouched, and kass still records the error in stats. So you can
+commit the hook even if some of your team has no key.
 
 ## Stats
 
-Every run is recorded in `~/.local/state/kass/stats.db` (or
-`$XDG_STATE_HOME/kass/`, or `$KASS_STATE_DIR`):
+kass records every run in `~/.local/state/kass/stats.db`. Set
+`$XDG_STATE_HOME` or `$KASS_STATE_DIR` to move it. There are three tables:
 
-- **`runs`:** who ran kass; hook runs keep the harness, session and tool.
-- **`requests`:** one per test or file: name, line, helpers sent and omitted,
-  bytes, latency, Jev model version, input tokens, errors.
-- **`judgments`:** one per rule per request: probability, tier, thresholds,
-  and a hash of the rule text, so a number traces back to the exact wording.
+- `runs` has one row per run. Hook runs keep the harness, session and tool.
+- `requests` has one row per test or file, with its name, line, helpers sent
+  and dropped, bytes, latency, Jev model version, input tokens and any error.
+- `judgments` has one row per rule per request, with the probability, tier,
+  thresholds and a hash of the rule text. Reword a rule and you can still tell
+  which numbers came from which wording.
 
 `kass stats` summarizes them: latency percentiles, the largest request, tokens
-per KiB, and per-rule counts.
+per KiB, and counts per rule.
 
 ## Cost and speed
 
-Jev charges for input tokens only ($0.042 per million at the time of writing).
-Measured on a codebase with about 900 test files, `kass check --all` made
-4,350 requests in 4m18s and cost $0.41, with a p50 latency of 277ms and a p95
-of 374ms. Day to day, `kass check` only judges the tests you touched, so a run
-is a handful of requests and well under a cent.
+Jev charges only for input tokens, $0.042 per million when I wrote this. On my
+main project (about 900 test files), `kass check --all` made 4,350 requests in
+4m18s and cost $0.41. Latency was 277ms at p50 and 374ms at p95. Day to day,
+`kass check` only judges the tests you touched. The go-worker example is 3
+requests.
 
 ## Environment
 
@@ -216,9 +223,10 @@ is a handful of requests and well under a cent.
 
 ## The demo
 
-The GIF above is rendered locally from HTML with
+I rendered the GIF locally from HTML with
 [HyperFrames](https://github.com/heygen-com/hyperframes). Its numbers come
-from real runs on `examples/go-worker`. The source is in [`docs/demo`](docs/demo).
+from real runs on `examples/go-worker`, and the source is in
+[`docs/demo`](docs/demo).
 
 ## License
 
