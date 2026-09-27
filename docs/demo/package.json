@@ -1,0 +1,11 @@
+{
+  "name": "kass-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fonts": "./fetch-fonts.sh",
+    "check": "npx --yes hyperframes@0.8.80 check",
+    "render": "npx --yes hyperframes@0.8.80 render --quality delivery --output kass-demo.mp4",
+    "gif": "ffmpeg -y -i kass-demo.mp4 -vf \"fps=15,scale=1200:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle\" ../demo.gif"
+  }
+}

@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face {
+        font-family: "JetBrains Mono";
+        src: url("assets/JetBrainsMono.ttf");
+        font-weight: 100 800;
+      }
+      @font-face {
+        font-family: "Inter";
+        src: url("assets/Inter.ttf");
+        font-weight: 100 900;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; font-variant-ligatures: none; font-feature-settings: "calt" 0, "liga" 0; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0a0a12; }
+      #root {
+        position: relative; width: 100%; height: 100%; overflow: hidden;
+        font-family: "Inter", sans-serif; color: #ecebf5;
+        background: radial-gradient(1200px 700px at 50% 45%, #15121f 0%, #0a0a12 70%);
+      }
+      #logo { position: absolute; left: 492px; top: 250px; width: 936px; height: 396px; }
+      #logo svg { width: 100%; height: 100%; display: block; }
+      #tagline {
+        position: absolute; left: 0; right: 0; top: 690px; text-align: center;
+        font-size: 50px; font-weight: 600; letter-spacing: -0.02em; color: #f4f1ff;
+      }
+      #tagline small {
+        display: block; margin-top: 18px; font-size: 32px; font-weight: 400; color: #a7a2bf; letter-spacing: 0;
+      }
+      .caption {
+        position: absolute; left: 470px; right: 80px; top: 62px; height: 90px;
+        display: flex; align-items: center; gap: 22px;
+        font-size: 44px; font-weight: 600; letter-spacing: -0.02em;
+      }
+      .caption b {
+        display: inline-grid; place-items: center; width: 62px; height: 62px; border-radius: 50%;
+        font-size: 32px; background: #ff2bd6; color: #14051a; box-shadow: 0 0 28px #ff2bd6aa;
+      }
+      .window {
+        position: absolute; left: 160px; top: 180px; width: 1600px; height: 850px;
+        background: #11101a; border: 1px solid #2a2640; border-radius: 22px;
+        box-shadow: 0 40px 120px #000a, 0 0 0 1px #0006;
+        overflow: hidden;
+      }
+      .bar {
+        height: 58px; display: flex; align-items: center; gap: 12px; padding: 0 24px;
+        background: #171525; border-bottom: 1px solid #2a2640;
+        font: 500 24px "JetBrains Mono", monospace; color: #8d88a8;
+      }
+      .bar i { width: 16px; height: 16px; border-radius: 50%; background: #3a3552; display: inline-block; }
+      .bar span { margin-left: 18px; }
+      pre {
+        font: 400 29px/1.5 "JetBrains Mono", monospace; color: #dcd8ee;
+        padding: 26px 40px; white-space: pre;
+        font-variant-ligatures: none; font-feature-settings: "calt" 0, "liga" 0;
+      }
+      .ln { color: #6a6488; }
+      .kw { color: #c792ff; }
+      .fn { color: #7fd6ff; }
+      .str { color: #b5e48c; }
+      .num { color: #ffb86b; }
+      .cm { color: #6d6888; }
+      .dim { color: #8d88a8; }
+      .pink { color: #ff5ce1; }
+      .green { color: #6dff9e; }
+      .red { color: #ff6b8b; }
+      .t { display: inline-block; overflow: hidden; vertical-align: top; white-space: pre; }
+      .hl { border-radius: 6px; }
+      .sep { border-top: 1px solid #2a2640; }
+      #badge {
+        position: absolute; right: 44px; bottom: 36px; padding: 10px 20px; border-radius: 999px;
+        font: 600 26px "JetBrains Mono", monospace; color: #14051a; background: #6dff9e;
+      }
+      #endcard { position: absolute; inset: 0; }
+      #endlogo { position: absolute; left: 622px; top: 170px; width: 676px; height: 286px; }
+      #endlogo svg { width: 100%; height: 100%; display: block; }
+      #install {
+        position: absolute; left: 330px; right: 330px; top: 520px; padding: 30px 40px; border-radius: 18px;
+        background: #11101a; border: 1px solid #2a2640; text-align: center;
+        font: 500 34px "JetBrains Mono", monospace; color: #ecebf5;
+      }
+      #points {
+        position: absolute; left: 0; right: 0; top: 700px; text-align: center;
+        font-size: 36px; color: #a7a2bf;
+      }
+      #points span { color: #ff5ce1; margin: 0 18px; }
+      #url {
+        position: absolute; left: 0; right: 0; top: 800px; text-align: center;
+        font-size: 40px; font-weight: 600; color: #f4f1ff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="25.6" data-width="1920" data-height="1080">
+      <svg width="0" height="0" style="position:absolute">
+        <defs>
+          <filter id="glow" x="-40%" y="-60%" width="180%" height="220%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="14" result="b1" />
+            <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="b2" />
+            <feFlood flood-color="#ff2bd6" flood-opacity=".75" />
+            <feComposite in2="b1" operator="in" result="g1" />
+            <feFlood flood-color="#ff2bd6" />
+            <feComposite in2="b2" operator="in" result="g2" />
+            <feMerge><feMergeNode in="g1" /><feMergeNode in="g2" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+          <g id="tubes" filter="url(#glow)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path id="tube-path" d="M22,14 V104 M64,50 L25,82 M38,72 L66,104 M144,50 V104 M144,77 A28,28 0 1 1 143.9,76.5 M214,56 C206,46 172,44 172,62 C172,80 214,72 214,90 C214,108 180,110 168,98 M276,56 C268,46 234,44 234,62 C234,80 276,72 276,90 C276,108 242,110 230,98" stroke="#ff2bd6" stroke-width="9" />
+            <use href="#tube-path" stroke="#ffe3f9" stroke-width="3.5" />
+          </g>
+        </defs>
+      </svg>
+
+      <!-- Intro: the sign flickers on -->
+      <div id="intro" class="clip" data-start="0" data-duration="3.4" data-track-index="0">
+        <div id="logo"><svg viewBox="0 0 520 220"><use href="#tubes" transform="translate(114,52)" /></svg></div>
+        <div id="tagline">Lint rules in plain English, for code your agents write.<small>Each rule is a yes/no question, answered by Jev in about 300ms.</small></div>
+      </div>
+
+      <!-- Corner logo for the middle scenes -->
+      <div id="corner" class="clip" data-start="3.4" data-duration="17" data-track-index="1">
+        <div style="position:absolute;left:40px;top:34px;width:380px;height:161px">
+          <svg viewBox="0 0 520 220" style="width:100%;height:100%"><use href="#tubes" transform="translate(114,52)" /></svg>
+        </div>
+      </div>
+
+      <!-- Scene 1: the rule -->
+      <div id="s1" class="clip" data-start="3.4" data-duration="5" data-track-index="2">
+        <div class="caption"><b>1</b><span>Write a rule as a yes/no question</span></div>
+        <div class="window" style="height:560px;top:250px">
+          <div class="bar"><i></i><i></i><i></i><span>.kass/rules/test-smells.md</span></div>
+<pre style="font-size:36px;padding:34px 48px"><span class="t pink" id="r1"># test-waits-on-sleep</span>
+<span class="t dim" id="r2">globs: **/*_test.go, **/*.test.ts</span>
+
+<span class="t" id="r3">Does a test in `content` wait for something to happen by</span>
+<span class="t" id="r4">sleeping, or by polling in a loop with a timer, instead of</span>
+<span class="t" id="r5">waiting on a real signal such as a channel, event, callback,</span>
+<span class="t" id="r6">or returned value?</span></pre>
+        </div>
+      </div>
+
+      <!-- Scene 2: kass check -->
+      <div id="s2" class="clip" data-start="8.4" data-duration="5.8" data-track-index="2">
+        <div class="caption"><b>2</b><span>kass judges each test, with the helpers it calls</span></div>
+        <div class="window">
+          <div class="bar"><i></i><i></i><i></i><span>~/worker</span></div>
+<pre style="font-size:26px;padding-bottom:14px"><span class="ln"> 9</span>  <span class="kw">func</span> <span class="fn">TestPoolRunsEveryJob</span>(t *testing.T) {
+<span class="ln">10</span>  	p := NewPool(<span class="num">4</span>)
+<span class="ln">11</span>  	<span class="kw">var</span> ran atomic.Int32
+<span class="ln">12</span>  	<span class="kw">for range</span> <span class="num">10</span> {
+<span class="ln">13</span>  		p.Submit(<span class="kw">func</span>() { ran.Add(<span class="num">1</span>) })
+<span class="ln">14</span>  	}
+<span class="ln">15</span>  	p.Close()
+<span class="ln">16</span>  	<span class="hl" id="call">waitForJobs()</span>
+<span class="ln">17</span>  	<span class="kw">if</span> got := ran.Load(); got != <span class="num">10</span> {
+<span class="ln">18</span>  		t.Fatalf(<span class="str">"ran %d jobs, want 10"</span>, got)
+<span class="ln">19</span>  	}
+<span class="ln">20</span>  }
+<span class="ln">  </span>  <span class="cm">…</span>
+<span class="ln">42</span>  <span class="kw">func</span> <span class="fn">waitForJobs</span>() { <span class="hl" id="sleep">time.Sleep(<span class="num">100</span> * time.Millisecond)</span> }</pre>
+<pre class="sep" style="font-size:26px;padding-top:16px"><span class="green">$</span> <span class="t" id="cmd1">kass check</span>
+<span id="o1"><span class="pink">worker_test.go:9</span> TestPoolRunsEveryJob</span>
+<span id="o2">  <span class="red">violation</span>  test-waits-on-sleep  p=0.98 (fail &gt;= 0.85)</span>
+<span id="o3" class="dim">3 test(s) judged: 1 violation(s), 0 to double-check, 0 error(s)</span></pre>
+          <div id="badge">0.39s</div>
+        </div>
+      </div>
+
+      <!-- Scene 3: the agent loop -->
+      <div id="s3" class="clip" data-start="14.2" data-duration="6.2" data-track-index="2">
+        <div class="caption"><b>3</b><span>Your agent hears about it the moment it writes it</span></div>
+        <div class="window" style="height:720px;top:220px">
+          <div class="bar"><i></i><i></i><i></i><span>agent session</span></div>
+<pre style="font-size:30px;padding-top:34px"><span id="a1"><span class="fn">●</span> Edit(worker_test.go)</span>
+<span id="a2"><span class="dim">  └</span> <span class="pink">PostToolUse hook: kass hook claude</span></span>
+<span id="a3">    kass found likely rule violations. Fix them:</span>
+<span id="a4">    - worker_test.go:9 TestPoolRunsEveryJob: test-waits-on-sleep (p=0.98)</span>
+
+<span id="a5"><span class="fn">●</span> <span class="t" id="a5t">The test sleeps and hopes. The pool already exposes Done(), so I'll wait on it.</span></span>
+
+<span id="a6"><span class="fn">●</span> Edit(worker_test.go)</span>
+<span id="a7"><span class="red">  - 	waitForJobs()</span></span>
+<span id="a8"><span class="green">  + 	&lt;-p.Done()</span></span>
+
+<span id="a9"><span class="green">$</span> <span class="t" id="cmd2">kass check</span></span>
+<span id="a10" class="green">3 test(s) judged: 0 violation(s), 0 to double-check, 0 error(s)  ✓</span></pre>
+        </div>
+      </div>
+
+      <!-- End card -->
+      <div id="endcard" class="clip" data-start="20.4" data-duration="5.2" data-track-index="3">
+        <div id="endlogo"><svg viewBox="0 0 520 220"><use href="#tubes" transform="translate(114,52)" /></svg></div>
+        <div id="install"><span class="green">$</span> cargo install --git https://github.com/victorarias/kass</div>
+        <div id="points">Rules in markdown<span>·</span>one test at a time<span>·</span>every judgment in SQLite</div>
+        <div id="url">github.com/victorarias/kass</div>
+      </div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      const typeIn = (sel, at, cps = 38) => {
+        const el = document.querySelector(sel);
+        const n = el.textContent.length;
+        tl.fromTo(el, { width: 0 }, { width: n + "ch", duration: n / cps, ease: `steps(${n})` }, at);
+        return at + n / cps;
+      };
+      const show = (sel, at) => tl.fromTo(sel, { opacity: 0 }, { opacity: 1, duration: 0.12 }, at);
+
+      // Intro flicker: deterministic on/off beats like a sign warming up.
+      [[0, 0], [0.25, 1], [0.33, 0.15], [0.45, 1], [0.52, 0.3], [0.6, 1], [1.9, 0.4], [1.95, 1]].forEach(([t, o]) =>
+        tl.set("#logo", { opacity: o }, t));
+      tl.fromTo("#tagline", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 0.9);
+      tl.to("#intro > *", { opacity: 0, duration: 0.3 }, 3.1);
+
+      // Scene 1
+      tl.fromTo("#s1 .window", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" }, 3.4);
+      tl.fromTo("#s1 .caption", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 3.5);
+      let t = 3.9;
+      ["#r1", "#r2", "#r3", "#r4", "#r5", "#r6"].forEach((sel, i) => { t = typeIn(sel, t, i < 2 ? 45 : 115) + 0.04; });
+
+      // Scene 2
+      tl.fromTo("#s2 .caption", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 8.4);
+      const cmdEnd = typeIn("#cmd1", 8.9, 16);
+      ["#o1", "#o2", "#o3"].forEach((sel) => show(sel, cmdEnd + 0.39));
+      show("#badge", cmdEnd + 0.39);
+      tl.fromTo("#call", { backgroundColor: "rgba(255,43,214,0)" }, { backgroundColor: "rgba(255,43,214,0.3)", duration: 0.3 }, cmdEnd + 0.7);
+      tl.fromTo("#sleep", { backgroundColor: "rgba(255,43,214,0)" }, { backgroundColor: "rgba(255,43,214,0.3)", duration: 0.3 }, cmdEnd + 1.1);
+
+      // Scene 3
+      tl.fromTo("#s3 .caption", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 14.2);
+      show("#a1", 14.5);
+      ["#a2", "#a3", "#a4"].forEach((sel) => show(sel, 15));
+      show("#a5", 16);
+      const thought = typeIn("#a5t", 16.05, 60);
+      ["#a6", "#a7", "#a8"].forEach((sel) => show(sel, thought + 0.3));
+      show("#a9", thought + 0.9);
+      const cmd2 = typeIn("#cmd2", thought + 0.95, 16);
+      show("#a10", cmd2 + 0.53);
+
+      // End card
+      [[20.4, 0], [20.55, 1], [20.62, 0.2], [20.72, 1]].forEach(([t, o]) => tl.set("#endlogo", { opacity: o }, t));
+      tl.fromTo("#install", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5 }, 21);
+      tl.fromTo("#points", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 21.5);
+      tl.fromTo("#url", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 21.9);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

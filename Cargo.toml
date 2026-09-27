@@ -2,6 +2,12 @@
 name = "kass"
 version = "0.1.0"
 edition = "2024"
+description = "Lint rules in plain English, judged one test at a time by TypeSafe's Jev"
+license = "MIT"
+repository = "https://github.com/victorarias/kass"
+readme = "README.md"
+keywords = ["lint", "testing", "ai", "code-review", "agents"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1.0.104"
