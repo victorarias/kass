@@ -165,7 +165,7 @@ fn check_tiers_exit_code_and_records_stats() {
     assert!(stdout.contains("check      mock-only  p=0.70"), "{stdout}");
     assert!(
         stdout.contains(
-            "1 test(s) and 0 whole file(s) judged: 1 violation(s), 1 to double-check, 0 error(s)"
+            "1 test(s), 0 part(s) outside any test and 0 whole file(s) judged: 1 violation(s), 1 to double-check, 0 error(s)"
         ),
         "{stdout}"
     );
@@ -471,6 +471,11 @@ fn each_test_is_judged_alone_with_the_helpers_it_calls() {
     )
     .unwrap();
     std::fs::write(
+        env.repo.join("pkg/mixed_test.go"),
+        "package pkg\n\nvar _ = Scenario(\"unknown library\", func() {})\n\nfunc TestC(t *testing.T) {}\n",
+    )
+    .unwrap();
+    std::fs::write(
         env.repo.join("pkg/main_test.go"),
         "package pkg\n\nfunc TestMain(m *testing.M) { m.Run() }\n",
     )
@@ -494,6 +499,8 @@ fn each_test_is_judged_alone_with_the_helpers_it_calls() {
             ("pkg/foo_test.go".into(), "TestB".into(), vec![]),
             ("pkg/helpers_test.go".into(), "<file>".into(), vec![]),
             ("pkg/main_test.go".into(), "<file>".into(), vec![]),
+            ("pkg/mixed_test.go".into(), "<file>".into(), vec![]),
+            ("pkg/mixed_test.go".into(), "TestC".into(), vec![]),
         ]
     );
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -506,6 +513,16 @@ fn each_test_is_judged_alone_with_the_helpers_it_calls() {
     assert_eq!(
         (a["line"].as_i64(), a["helpers"].as_i64()),
         (Some(5), Some(1))
+    );
+    let rest = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["path"] == "pkg/mixed_test.go" && r["test"] != "TestC")
+        .unwrap();
+    assert_eq!(
+        (rest["test"].as_str(), rest["line"].as_i64()),
+        (Some("outside any test (1 lines)"), Some(3))
     );
 }
 

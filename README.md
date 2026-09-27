@@ -52,12 +52,25 @@ one bad test doesn't dilute the score of the others:
  "helpers": [{"name": "waitReady", "path": "pkg/util_test.go", "code": "func waitReady(...) {...}"}]}
 ```
 
-- **Tests:** Go `func TestXxx`; JS `it`/`test` calls, named by their `describe`
-  path (Playwright's `test.describe` and `test.step` included).
-- **Helpers:** every declaration the test reaches, transitively: functions,
-  types, vars and consts from the same file, JS `beforeEach`/`afterEach` hooks
-  and enclosing `describe` scopes, and for Go, other `_test.go` files in the package.
+- **Tests:**
+  - Go: `func TestXxx`, testify suite methods (`func (s *S) TestXxx()`), and
+    Ginkgo `It`/`Specify`/`DescribeTable`.
+  - JS: `it`/`test`/`specify` calls from Jest, Vitest, Jasmine, mocha,
+    node:test, ava and Playwright, with their `.only`/`.skip`/`.each`, `fit`/`xit`
+    and `test.describe` forms.
+  - Spec-style tests are named by their container path, such as `queue > drains`.
+- **Helpers:** every declaration the test reaches, transitively, found by
+  identifier, so this part works the same for any library:
+  - functions, types, vars and consts from the same file
+  - hooks (`beforeEach`, mocha's `before`, Ginkgo's `BeforeEach`, testify's
+    `SetupTest`) and declarations in the enclosing blocks
+  - for Go, declarations in other `_test.go` files of the package
+
   Helpers that would push the state past 60KB are left out and counted.
+- **Outside any test:** code that no recognized test contains or reaches,
+  such as specs from a library kass doesn't know or helpers only other files
+  use, is sent as its own request (labeled `outside any test (N lines)`), so
+  nothing goes unjudged.
 - **Changed tests only:** `kass check` and the hook judge a test only when its
   lines, or a same-file helper's lines, changed since HEAD. `--all` judges every test.
 

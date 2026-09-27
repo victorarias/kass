@@ -1,6 +1,6 @@
 use crate::jev::Client;
 use crate::rules::{Rule, Tier};
-use crate::units::{self, Decl, Lang};
+use crate::units::{self, Decl, Lang, Snippet};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -32,6 +32,8 @@ pub struct FileResult {
 pub struct UnitRef {
     pub name: String,
     pub line: usize,
+    /// Code outside every test kass recognized, judged so nothing is skipped.
+    pub outside_tests: bool,
 }
 
 pub enum FileOutcome {
@@ -153,12 +155,12 @@ fn plan_file<'r>(
         &[]
     };
 
+    let touched = |start: usize, end: usize| {
+        ranges.is_none_or(|rs| rs.iter().any(|&(a, b)| a <= end && start <= b))
+    };
     let mut out = Vec::new();
     for (i, unit) in parsed.units.iter().enumerate() {
         let helpers = units::helpers_for(&parsed, i, extra);
-        let touched = |start: usize, end: usize| {
-            ranges.is_none_or(|rs| rs.iter().any(|&(a, b)| a <= end && start <= b))
-        };
         let same_file_helper_touched = helpers
             .iter()
             .any(|h| h.path == path && touched(h.start_line, h.end_line));
@@ -177,11 +179,54 @@ fn plan_file<'r>(
         let omitted = helpers.len() - packed.len();
         out.push(Target {
             path: path.into(),
-            unit: Some(UnitRef { name: unit.name.clone(), line: unit.start_line }),
+            unit: Some(UnitRef {
+                name: unit.name.clone(),
+                line: unit.start_line,
+                outside_tests: false,
+            }),
             state: json!({"path": path, "test": unit.name, "content": unit.code, "helpers": packed}),
             bytes: size,
             helpers: packed.len(),
             helpers_omitted: omitted,
+            rules: rules.clone(),
+        });
+    }
+
+    let rest: Vec<&Snippet> = parsed
+        .rest
+        .iter()
+        .filter(|s| touched(s.start_line, s.end_line))
+        .collect();
+    let mut chunks: Vec<Vec<&Snippet>> = Vec::new();
+    let mut size = 0;
+    for s in rest {
+        match chunks.last_mut() {
+            Some(chunk) if size + s.code.len() <= STATE_BUDGET_BYTES => chunk.push(s),
+            _ => {
+                size = 0;
+                chunks.push(vec![s]);
+            }
+        }
+        size += s.code.len();
+    }
+    for chunk in chunks {
+        let lines: usize = chunk.iter().map(|s| s.end_line - s.start_line + 1).sum();
+        let content = chunk
+            .iter()
+            .map(|s| s.code.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        out.push(Target {
+            path: path.into(),
+            unit: Some(UnitRef {
+                name: format!("outside any test ({lines} lines)"),
+                line: chunk[0].start_line,
+                outside_tests: true,
+            }),
+            bytes: path.len() + content.len(),
+            state: json!({"path": path, "content": content}),
+            helpers: 0,
+            helpers_omitted: 0,
             rules: rules.clone(),
         });
     }

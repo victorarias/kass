@@ -260,9 +260,11 @@ fn label(r: &FileResult) -> String {
 }
 
 fn count_label(results: &[FileResult]) -> String {
-    let tests = results.iter().filter(|r| r.unit.is_some()).count();
-    let files = results.len() - tests;
-    format!("{tests} test(s) and {files} whole file(s)")
+    let outside = |r: &&FileResult| r.unit.as_ref().is_some_and(|u| u.outside_tests);
+    let parts = results.iter().filter(outside).count();
+    let tests = results.iter().filter(|r| r.unit.is_some()).count() - parts;
+    let files = results.len() - tests - parts;
+    format!("{tests} test(s), {parts} part(s) outside any test and {files} whole file(s)")
 }
 
 fn omitted_note(r: &FileResult) -> String {
